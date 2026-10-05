@@ -51,7 +51,7 @@ integrated with nix-darwin on Apple Silicon.
     settings."*" = {
       IdentityFile = config.programs.scauth.identities.personal.identityFile;
       IdentitiesOnly = true;
-      SecurityKeyProvider = "/usr/lib/ssh-keychain.dylib";
+      SecurityKeyProvider = config.programs.scauth.securityKeyProvider;
     };
   };
 }
@@ -97,7 +97,7 @@ configuration, because creating the keys may require your Touch ID approval.
 For Git signing, add this to your Home Manager configuration:
 
 ```nix
-home.sessionVariables.SSH_SK_PROVIDER = "/usr/lib/ssh-keychain.dylib";
+home.sessionVariables.SSH_SK_PROVIDER = config.programs.scauth.securityKeyProvider;
 ```
 
 ## Provisioning and retries

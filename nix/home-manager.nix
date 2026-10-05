@@ -54,6 +54,12 @@ in
 {
   options.programs.scauth = {
     enable = mkEnableOption "CryptoTokenKit SSH identity provisioning";
+    securityKeyProvider = mkOption {
+      type = types.str;
+      readOnly = true;
+      default = "/usr/lib/ssh-keychain.dylib";
+      description = "Apple's CryptoTokenKit provider for SSH and ssh-keygen.";
+    };
     package = mkOption {
       type = types.package;
       default = pkgs.callPackage ./package.nix { };

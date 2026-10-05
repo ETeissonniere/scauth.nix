@@ -42,7 +42,7 @@ let
       settings."*" = {
         IdentityFile = config.programs.scauth.identities.work.identityFile;
         IdentitiesOnly = true;
-        SecurityKeyProvider = "/usr/lib/ssh-keychain.dylib";
+        SecurityKeyProvider = config.programs.scauth.securityKeyProvider;
         AddKeysToAgent = "yes";
       };
       settings.github = {
@@ -52,6 +52,7 @@ let
         ServerAliveInterval = 47;
       };
     };
+    home.sessionVariables.SSH_SK_PROVIDER = config.programs.scauth.securityKeyProvider;
     programs.git = {
       enable = true;
       signing = {
@@ -103,6 +104,8 @@ assert !(alice.launchd.agents ? scauth);
 assert !(disabled.xdg.configFile ? "scauth/config.json");
 assert !(disabled.home.activation ? scauth);
 assert !provisioningOnly.programs.ssh.enable;
+assert !(provisioningOnly.home.sessionVariables ? SSH_SK_PROVIDER);
+assert alice.home.sessionVariables.SSH_SK_PROVIDER == "/usr/lib/ssh-keychain.dylib";
 assert !(provisioningOnly.home.file ? ".ssh/config");
 assert existingSsh true == existingSsh false;
 assert
