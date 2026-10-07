@@ -4,6 +4,50 @@ use std::cell::{Cell, RefCell};
 const PUBLIC_KEY: &str = "sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBKiHAiAZhcsZ95n85dkNGs9GnbDt0aNOia2gnuknYV2wKL3y0u+d3QrE9cFkmWXIymHZMglL+uJA+6mShY8SeykAAAAEc3NoOg== ssh:";
 const HASH: &str = "A71277F0BC5825A7B3576D014F31282A866EF3BC";
 
+#[test]
+fn lists_all_exported_public_keys_in_name_order() {
+    let root = tempfile::tempdir().unwrap();
+    let mut expected = String::new();
+    for label in ["work", "personal"] {
+        let directory = root.path().join(label);
+        fs::create_dir(&directory).unwrap();
+        // Files without a trailing newline must still print on separate lines.
+        fs::write(
+            directory.join("id_ecdsa_sk.pub"),
+            format!("{PUBLIC_KEY} {label}"),
+        )
+        .unwrap();
+    }
+    for label in ["personal", "work"] {
+        expected.push_str(&format!("{PUBLIC_KEY} {label}\n"));
+    }
+    fs::write(root.path().join("managed.json"), "{}").unwrap();
+    fs::create_dir(root.path().join("unfinished")).unwrap();
+    let staging = root.path().join(".staging");
+    fs::create_dir(&staging).unwrap();
+    fs::write(staging.join("id_ecdsa_sk.pub"), "unfinished key").unwrap();
+
+    assert_eq!(public_keys(root.path()).unwrap(), expected);
+}
+
+#[test]
+fn no_exported_public_keys_is_an_empty_result() {
+    let root = tempfile::tempdir().unwrap();
+    for path in [root.path().to_path_buf(), root.path().join("missing")] {
+        assert_eq!(public_keys(&path).unwrap(), "");
+    }
+}
+
+#[test]
+fn unreadable_public_key_reports_its_path() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("work/id_ecdsa_sk.pub");
+    fs::create_dir_all(&path).unwrap();
+
+    let error = public_keys(root.path()).unwrap_err().to_string();
+    assert!(error.contains(&path.display().to_string()));
+}
+
 fn config(names: &[&str]) -> Config {
     Config {
         user: "test".into(),

@@ -75,6 +75,9 @@ macOS CryptoTokenKit. This is expected: `scauth` is creating your new identities
 with keys protected by the Secure Enclave. Approve the prompt to finish provisioning.
 
 ```fish
+# Show all public keys, labeled with their identity names.
+scauth pubkey
+
 # Copy this output to GitHub.
 scauth pubkey personal
 

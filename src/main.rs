@@ -434,17 +434,56 @@ fn main() {
     }
 }
 
+fn public_keys(root: &Path) -> Result<String> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() && entry.file_name().to_str().is_some_and(valid_name) {
+            paths.push(entry.path().join("id_ecdsa_sk.pub"));
+        }
+    }
+    paths.sort();
+    let mut output = String::new();
+    for path in paths {
+        let key = match fs::read_to_string(&path) {
+            Ok(key) => key,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("{}: {error}", path.display()).into()),
+        };
+        output.push_str(&key);
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+    }
+    Ok(output)
+}
+
 fn cli() -> Result<()> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args == ["--help"] || args == ["-h"] {
         println!(
-            "Usage: scauth reconcile [CONFIG.json]\n       scauth pubkey NAME\n\nConfig: $XDG_CONFIG_HOME/scauth/config.json (default ~/.config/scauth/config.json)\nFiles: ~/.ssh/scauth/NAME/id_ecdsa_sk[.pub]\nRun as the configured user in their macOS login session."
+            "Usage: scauth reconcile [CONFIG.json]\n       scauth pubkey [NAME]\n\nOmit NAME to show all exported public keys.\nConfig: $XDG_CONFIG_HOME/scauth/config.json (default ~/.config/scauth/config.json)\nFiles: ~/.ssh/scauth/NAME/id_ecdsa_sk[.pub]\nRun as the configured user in their macOS login session."
         );
         return Ok(());
     }
     let home = PathBuf::from(env::var("HOME")?);
     let root = home.join(".ssh/scauth");
     match args.as_slice() {
+        [command] if command == "pubkey" => {
+            let keys = public_keys(&root)?;
+            if keys.is_empty() {
+                eprintln!(
+                    "No public keys found. Run `scauth reconcile` to provision your configured identities."
+                );
+            } else {
+                print!("{keys}");
+            }
+        }
         [command, name] if command == "pubkey" && valid_name(name) => {
             print!(
                 "{}",
@@ -467,7 +506,7 @@ fn cli() -> Result<()> {
             }
             reconcile(&MacKeychain, &config, &root)?;
         }
-        _ => return Err("usage: scauth reconcile [CONFIG.json] | scauth pubkey NAME".into()),
+        _ => return Err("usage: scauth reconcile [CONFIG.json] | scauth pubkey [NAME]".into()),
     }
     Ok(())
 }
