@@ -174,7 +174,8 @@ impl Keychain for MacKeychain {
     }
 
     fn export(&self, hash: &str, directory: &Path) -> Result<()> {
-        // Filtering also avoids Apple's resident-key filename collision.
+        // ssh-keychain(8) documents this filter, but resident-key exports may
+        // still include other identities. Verify the exported stubs below.
         run(Command::new("/usr/bin/ssh-keygen")
             .args(["-w", PROVIDER, "-K", "-N", ""])
             .env("KEYCHAIN_CERTIFICATES", hash)
@@ -312,12 +313,12 @@ fn export_identity(
     root: &Path,
     label: &str,
     hash: &str,
-    fingerprint: &str,
+    expected_fingerprint: &str,
 ) -> Result<()> {
     let directory = root.join(label);
     if directory.exists() {
         let public_key = keychain.public_key(&directory.join("id_ecdsa_sk"))?;
-        check_fingerprint(&public_key, fingerprint)?;
+        check_fingerprint(&public_key, expected_fingerprint)?;
         write_public_key(&directory, &public_key, label)?;
         return Ok(());
     }
@@ -325,19 +326,26 @@ fn export_identity(
     // Publish the pair together, and never leave a half-written identity.
     let staging = tempfile::tempdir_in(root)?;
     keychain.export(hash, staging.path())?;
-    let stubs: Vec<_> = fs::read_dir(staging.path())?
-        .map(|entry| entry.map(|entry| entry.path()))
-        .collect::<io::Result<Vec<_>>>()?
-        .into_iter()
-        .filter(|path| path.extension().is_none())
-        .collect();
-    if stubs.len() != 1 {
-        return Err("expected exactly one exported SSH stub".into());
+    let mut selected = None;
+    for entry in fs::read_dir(staging.path())? {
+        let path = entry?.path();
+        if path.extension().is_some() {
+            continue;
+        }
+        // Derive from the stub: filenames and exported .pub files are not proof
+        // that it belongs to the CTK identity selected by sc_auth.
+        let public_key = keychain.public_key(&path)?;
+        if fingerprint(&public_key)? == expected_fingerprint {
+            if selected.is_some() {
+                return Err("multiple exported SSH stubs match the managed CTK identity".into());
+            }
+            selected = Some((path, public_key));
+        }
     }
-    let public_key = keychain.public_key(&stubs[0])?;
-    check_fingerprint(&public_key, fingerprint)?;
+    let (path, public_key) =
+        selected.ok_or("no exported SSH stub matches the managed CTK identity")?;
     let stub = staging.path().join("id_ecdsa_sk");
-    fs::rename(&stubs[0], &stub)?;
+    fs::rename(path, &stub)?;
     for entry in fs::read_dir(staging.path())? {
         let path = entry?.path();
         if path != stub {

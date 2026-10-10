@@ -72,6 +72,7 @@ struct FakeKeychain {
     deletes: RefCell<Vec<String>>,
     creates: Cell<usize>,
     exports: Cell<usize>,
+    export_files: Option<Vec<(String, String)>>,
     fail_export: Cell<bool>,
     fail_delete: Cell<bool>,
     ignore_delete: Cell<bool>,
@@ -121,8 +122,14 @@ impl Keychain for FakeKeychain {
                 .any(|label| self.hash(label) == hash)
         );
         self.exports.set(self.exports.get() + 1);
-        fs::write(directory.join("id_ecdsa_sk_rk"), PUBLIC_KEY)?;
-        fs::write(directory.join("id_ecdsa_sk_rk.pub"), PUBLIC_KEY)?;
+        if let Some(files) = &self.export_files {
+            for (name, contents) in files {
+                fs::write(directory.join(name), contents)?;
+            }
+        } else {
+            fs::write(directory.join("id_ecdsa_sk_rk"), PUBLIC_KEY)?;
+            fs::write(directory.join("id_ecdsa_sk_rk.pub"), PUBLIC_KEY)?;
+        }
         if self.fail_export.get() {
             return Err("cancelled".into());
         }
@@ -221,6 +228,93 @@ fn rejects_duplicate_labels_policy_changes_and_expired_certificates() {
     assert!(select_identity(&rows, "work", &desired).is_err());
     backend.labels.borrow_mut().push("work".into());
     assert!(select_identity(&backend.list(false).unwrap(), "work", &desired).is_err());
+}
+
+#[test]
+fn selects_exported_stub_by_fingerprint_instead_of_filename_or_public_file() {
+    let different = format!("{KEY_TYPE} YWJj");
+    for reverse in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut files = vec![
+            ("id_ecdsa_sk_rk_nix-builder".into(), different.clone()),
+            ("id_ecdsa_sk_rk_nix-builder.pub".into(), PUBLIC_KEY.into()),
+            ("id_ecdsa_sk_rk_default".into(), PUBLIC_KEY.into()),
+            ("id_ecdsa_sk_rk_default.pub".into(), different.clone()),
+        ];
+        if reverse {
+            files.reverse();
+        }
+        let backend = FakeKeychain {
+            export_files: Some(files),
+            ..Default::default()
+        };
+        reconcile(&backend, &config(&["nix-builder"]), directory.path()).unwrap();
+        let published = directory.path().join("nix-builder");
+        assert_eq!(
+            fs::read_to_string(published.join("id_ecdsa_sk")).unwrap(),
+            PUBLIC_KEY
+        );
+        let expected_public = PUBLIC_KEY
+            .split_whitespace()
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(
+            fs::read_to_string(published.join("id_ecdsa_sk.pub")).unwrap(),
+            format!("{expected_public} nix-builder\n")
+        );
+        assert_eq!(fs::read_dir(&published).unwrap().count(), 2);
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 3);
+    }
+}
+
+#[test]
+fn unsuccessful_stub_selection_publishes_nothing_and_removes_temporary_exports() {
+    let different = format!("{KEY_TYPE} YWJj");
+    for (stubs, error) in [
+        (
+            vec![],
+            "no exported SSH stub matches the managed CTK identity",
+        ),
+        (
+            vec![different.as_str()],
+            "no exported SSH stub matches the managed CTK identity",
+        ),
+        (
+            vec![PUBLIC_KEY, PUBLIC_KEY],
+            "multiple exported SSH stubs match the managed CTK identity",
+        ),
+        (
+            vec![PUBLIC_KEY, "malformed"],
+            "expected an OpenSSH P-256 security-key public key",
+        ),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let backend = FakeKeychain {
+            export_files: Some(
+                stubs
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(index, contents)| {
+                        [
+                            (format!("id_ecdsa_sk_rk_{index}"), (*contents).into()),
+                            (format!("id_ecdsa_sk_rk_{index}.pub"), PUBLIC_KEY.into()),
+                        ]
+                    })
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        assert_eq!(
+            reconcile(&backend, &config(&["work"]), directory.path())
+                .unwrap_err()
+                .to_string(),
+            error
+        );
+        assert!(!directory.path().join("work").exists());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+        assert!(directory.path().join("managed.json").exists());
+    }
 }
 
 #[test]
