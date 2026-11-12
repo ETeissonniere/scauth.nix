@@ -41,9 +41,8 @@
         };
       };
       devShells.${system}.default = pkgs.mkShell {
+        inputsFrom = [ self.packages.${system}.default ];
         packages = [
-          pkgs.cargo
-          pkgs.rustc
           pkgs.rustfmt
           pkgs.clippy
           pkgs.nixfmt

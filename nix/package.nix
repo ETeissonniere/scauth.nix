@@ -1,7 +1,10 @@
 { lib, rustPlatform }:
+let
+  cargoToml = lib.importTOML ../Cargo.toml;
+in
 rustPlatform.buildRustPackage {
-  pname = "scauth";
-  version = "0.1.0";
+  pname = cargoToml.package.name;
+  inherit (cargoToml.package) version;
   src = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
